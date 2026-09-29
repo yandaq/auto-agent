@@ -1,0 +1,29 @@
+{
+  "name": "auto-agent",
+  "version": "0.1.0",
+  "description": "Pi extension: designs a sub-agent team for the first prompt, then orchestrates it",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "subagent"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:e2e": "AUTO_AGENT_E2E=1 vitest run test/e2e"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "typebox": "^1.3.34",
+    "vitest": "^5.0.2"
+  }
+}

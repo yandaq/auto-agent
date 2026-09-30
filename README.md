@@ -20,8 +20,9 @@ ln -s "$PWD/extensions/auto-agent" ~/.pi/agent/extensions/auto-agent
 |---|---|---|
 | `PI_AUTOAGENT_CONCURRENCY` | unlimited | Max workers running at once per `spawn_agents` call |
 | `PI_AUTOAGENT_MAX_DEPTH` | 2 | Worker nesting cap (2 = orchestrator → worker → helper) |
-| `PI_AUTOAGENT_VIEW` | auto | Live view per worker: `herdr` (tab), `tmux` (window), `ghostty` (window) or `off`. Auto picks herdr inside herdr, tmux inside tmux, else Ghostty on a desktop, else off |
+| `PI_AUTOAGENT_VIEW` | auto | Live view per worker: `herdr` (tab), `tmux` (window), `ghostty` (window; on macOS one shared window of tiled panes) or `off`. Auto picks herdr inside herdr, tmux inside tmux, else Ghostty on a desktop, else off |
 | `PI_AUTOAGENT_VIEW_CLOSE` | 30 | Seconds a view stays open after its agent finishes; `0` keeps it open |
+| `PI_AUTOAGENT_VIEW_PANES` | 32 | macOS Ghostty: panes tiled per tab (up to 8×4, font shrinking to fit) before a new tab opens; `1` gives one tab per agent |
 | `PI_AUTOAGENT_PIN_MODELS` | off | `1` lets the designer pin each agent to a model and effort, chosen from your `enabledModels`. Off: every agent runs on your pi default model and thinking level |
 
 ### Live views

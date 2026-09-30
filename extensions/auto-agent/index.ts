@@ -187,15 +187,19 @@ export default function (pi: ExtensionAPI) {
 
 			const results = await mapWithLimit(params.tasks, concurrencyLimit(), async (t, i) => {
 				let logPath: string | undefined;
+				let view: Promise<void> | undefined;
 				try {
 					mkdirSync(logDir, { recursive: true });
 					logPath = join(logDir, `${batch}-${i + 1}-${t.agent}.log`);
 					writeFileSync(logPath, "");
-					await openViewer(backend, t.agent, logPath, ctx.cwd);
+					// Not awaited: views open one at a time, and the view tails the log from its start anyway.
+					view = openViewer(backend, t.agent, logPath, ctx.cwd).catch((err) => {
+						viewErrors.push(`${t.agent}: ${errorText(err)}`);
+					});
 				} catch (err) {
 					viewErrors.push(`${t.agent}: ${errorText(err)}`);
 				}
-				return runWorker({
+				const result = await runWorker({
 					agent: library.find((a) => a.name === t.agent) as AgentDef,
 					task: t.task,
 					originalPrompt,
@@ -210,6 +214,8 @@ export default function (pi: ExtensionAPI) {
 						render();
 					},
 				});
+				await view;
+				return result;
 			});
 			render.flush();
 			if (ctx.hasUI) ctx.ui.setWidget(WIDGET_ID, undefined);

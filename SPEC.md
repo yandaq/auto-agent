@@ -15,7 +15,7 @@ A Pi extension (`@earendil-works/pi-coding-agent`, v0.87+) that turns the first 
    - The designer may choose cheaper models for simple roles; otherwise the agent inherits the session model.
    - A refined agent's file is overwritten in place.
 4. **Manifest** — each run writes `./.pi/sub-agents/runs/<run-id>.json` recording the prompt, team, plan, and which agents were created, reused or refined.
-5. **Orchestrate** — the HITL session gets an orchestrator system prompt (`before_agent_start`) and receives the original prompt. Its brief is to finish the task as fast as possible using the team, with no limit on fan-out.
+5. **Orchestrate** — the HITL session gets an orchestrator system prompt (`before_agent_start`) and receives the original prompt. Its brief is to finish the task as fast as possible using the team, with no limit on fan-out. The orchestrator only reads and delegates: its active tools are cut to `read`, `grep`, `find`, `ls` and `spawn_agents`, and a `tool_call` hook blocks any other tool, so every code change, test run and post-verification fix goes to a sub-agent.
 
 No human checkpoints. Progress appears as status notifications.
 

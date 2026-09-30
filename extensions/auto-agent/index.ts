@@ -17,7 +17,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentDef, LIBRARY_DIR, loadLibrary, projectLibraryDir } from "./library.ts";
 import { openViewer, VIEW_ENV, viewerBackend } from "./viewer.ts";
-import { orchestratorPrompt } from "./orchestrator.ts";
+import { blockedToolReason, ORCHESTRATOR_TOOLS, orchestratorPrompt } from "./orchestrator.ts";
 import { type Complete, runPipeline, type Team } from "./pipeline.ts";
 import {
 	concurrencyLimit,
@@ -53,6 +53,7 @@ export default function (pi: ExtensionAPI) {
 			.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === ENTRY_TYPE)
 			.pop() as { data?: TeamState } | undefined;
 		state = saved?.data;
+		if (state) restrictToOrchestratorTools(pi);
 
 		if (ctx.hasUI && multiAgentLoaded(ctx.cwd)) {
 			ctx.ui.notify(
@@ -96,6 +97,7 @@ export default function (pi: ExtensionAPI) {
 			});
 			state = { team: result.team, prompt: event.text, runId };
 			pi.appendEntry(ENTRY_TYPE, state);
+			restrictToOrchestratorTools(pi);
 			if (ctx.hasUI) {
 				ctx.ui.notify(
 					`auto-agent: team of ${result.agents.length} ready (${result.team.members.map((m) => m.name).join(", ")}). ` +
@@ -119,6 +121,14 @@ export default function (pi: ExtensionAPI) {
 		if (!dir) return;
 		const agents = resolveTeam(state.team, loadLibrary(dir));
 		return { systemPrompt: `${event.systemPrompt}\n\n${orchestratorPrompt(state.team, agents)}` };
+	});
+
+	// Backstop for the tool restriction: blocks calls that reach the orchestrator anyway
+	// (another extension re-enabling tools, codemode scripts, a resumed session).
+	pi.on("tool_call", async (event) => {
+		if (isWorker || !state) return;
+		const reason = blockedToolReason(event.toolName);
+		if (reason) return { block: true, reason };
 	});
 
 	pi.registerTool({
@@ -357,4 +367,9 @@ function throttle(fn: () => void, ms: number): (() => void) & { flush: () => voi
 
 function errorText(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
+}
+
+/** Leave the orchestrator only the tools it may use (see ORCHESTRATOR_TOOLS). */
+function restrictToOrchestratorTools(pi: ExtensionAPI): void {
+	pi.setActiveTools(ORCHESTRATOR_TOOLS);
 }

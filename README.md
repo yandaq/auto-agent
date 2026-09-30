@@ -4,7 +4,7 @@ A Pi extension. The first prompt of a session is answered by a team of sub-agent
 
 1. **Design** — a nested model call proposes a team (reusing or refining agents already in the library, always with a verifier).
 2. **Define** — each new or refined agent is written to the project's own `.pi/sub-agents/<name>.md`, in parallel. A run manifest goes to `.pi/sub-agents/runs/`. Each project has its own library; if pi is started in your home directory (or above it), no team is designed, so nothing lands in the global `~/.pi`.
-3. **Orchestrate** — your session becomes the orchestrator and runs the team with the `spawn_agents` tool. Each worker is a separate `pi` process.
+3. **Orchestrate** — your session becomes the orchestrator and runs the team with the `spawn_agents` tool. It can only read and delegate (`read`, `grep`, `find`, `ls`, `spawn_agents`); all code, tests and fixes are done by sub-agents. Each worker is a separate `pi` process.
 
 Later prompts behave like normal Pi, and `spawn_agents` stays available. See [SPEC.md](SPEC.md) for the full design.
 

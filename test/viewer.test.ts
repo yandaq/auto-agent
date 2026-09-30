@@ -10,7 +10,8 @@ describe("viewerBackend", () => {
 		expect(viewerBackend({ HERDR_ENV: "1", TMUX: "/tmp/t" })).toBe("herdr");
 		expect(viewerBackend({ TMUX: "/tmp/t", TERM_PROGRAM: "ghostty", DISPLAY: ":0" })).toBe("tmux");
 		expect(viewerBackend({ TERM_PROGRAM: "ghostty", WAYLAND_DISPLAY: "wayland-1" })).toBe("ghostty");
-		expect(viewerBackend({ TERM_PROGRAM: "ghostty" })).toBe("off");
+		expect(viewerBackend({ TERM_PROGRAM: "ghostty" }, "linux")).toBe("off");
+		expect(viewerBackend({ TERM_PROGRAM: "ghostty" }, "darwin")).toBe("ghostty");
 		expect(viewerBackend({})).toBe("off");
 	});
 
@@ -27,9 +28,13 @@ describe("viewer commands", () => {
 			command: "tmux",
 			args: ["new-window", "-d", "-n", "spec-writer", "sh '/p/a b.log.sh'"],
 		});
-		expect(viewerCommand("ghostty", "spec-writer", "/p/a.log")).toEqual({
+		expect(viewerCommand("ghostty", "spec-writer", "/p/a.log", "linux")).toEqual({
 			command: "ghostty",
 			args: ["--title=spec-writer", "-e", "/p/a.log.sh"],
+		});
+		expect(viewerCommand("ghostty", "spec-writer", "/p/a.log", "darwin")).toEqual({
+			command: "open",
+			args: ["-na", "Ghostty.app", "--args", "--title=spec-writer", "-e", "/p/a.log.sh"],
 		});
 		expect(viewerScript("/p/a b.log", 0)).toBe("#!/bin/sh\nexec tail -n +1 -F '/p/a b.log'\n");
 	});

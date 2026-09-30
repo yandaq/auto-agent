@@ -14,12 +14,13 @@ type Env = Record<string, string | undefined>;
 const BACKENDS: ViewerBackend[] = ["herdr", "tmux", "ghostty", "off"];
 
 /** `PI_AUTOAGENT_VIEW` wins; otherwise herdr, then tmux, then Ghostty on a desktop. */
-export function viewerBackend(env: Env = process.env): ViewerBackend {
+export function viewerBackend(env: Env = process.env, platform: NodeJS.Platform = process.platform): ViewerBackend {
 	const forced = env[VIEW_ENV]?.trim().toLowerCase();
 	if (forced && (BACKENDS as string[]).includes(forced)) return forced as ViewerBackend;
 	if (env.HERDR_ENV === "1") return "herdr";
 	if (env.TMUX) return "tmux";
-	if (env.TERM_PROGRAM === "ghostty" && (env.DISPLAY || env.WAYLAND_DISPLAY)) return "ghostty";
+	// macOS always has a desktop; elsewhere Ghostty needs an X11/Wayland display.
+	if (env.TERM_PROGRAM === "ghostty" && (platform === "darwin" || env.DISPLAY || env.WAYLAND_DISPLAY)) return "ghostty";
 	return "off";
 }
 
@@ -38,12 +39,17 @@ export function viewerCommand(
 	backend: Exclude<ViewerBackend, "off" | "herdr">,
 	title: string,
 	logPath: string,
+	platform: NodeJS.Platform = process.platform,
 ): { command: string; args: string[] } {
 	const script = viewerScriptPath(logPath);
 	if (backend === "tmux") {
 		return { command: "tmux", args: ["new-window", "-d", "-n", title, shellJoin(["sh", script])] };
 	}
 	// Ghostty drops some arguments after -e (e.g. `-n +1`), so it gets one script path.
+	// On macOS the ghostty CLI cannot open windows; a new app instance must be launched via `open`.
+	if (platform === "darwin") {
+		return { command: "open", args: ["-na", "Ghostty.app", "--args", `--title=${title}`, "-e", script] };
+	}
 	return { command: "ghostty", args: [`--title=${title}`, "-e", script] };
 }
 

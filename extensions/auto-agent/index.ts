@@ -106,9 +106,15 @@ export default function (pi: ExtensionAPI) {
 				);
 			}
 		} catch (err) {
+			// Never fall through to a plain session: without a team it would have every tool,
+			// including write and bash. Drop the prompt so the user can resend it to retry.
 			if (ctx.hasUI) {
-				ctx.ui.notify(`auto-agent: team design failed, continuing without a team: ${errorText(err)}`, "error");
+				ctx.ui.notify(
+					`auto-agent: team design failed, so the prompt was not run: ${errorText(err)}. Send it again to retry.`,
+					"error",
+				);
 			}
+			return { action: "handled" };
 		} finally {
 			if (ctx.hasUI) ctx.ui.setStatus(STATUS_ID, undefined);
 		}

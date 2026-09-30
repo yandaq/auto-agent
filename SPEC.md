@@ -4,7 +4,7 @@ A Pi extension (`@earendil-works/pi-coding-agent`, v0.87+) that turns the first 
 
 ## Pipeline (first prompt only)
 
-1. **Intercept** — the `input` event catches the session's first non-steer prompt. Later prompts are handled by Pi as normal.
+1. **Intercept** — off by default. `/auto-agent` toggles it (or `PI_AUTOAGENT_ENABLED=1` starts it on); while on and no team exists, the `input` event catches the next non-steer prompt. Toggling off drops the team and restores the tools the session had before. Later prompts are handled by Pi as normal.
 2. **Design the team** — a nested model call (`ctx.modelRegistry.complete`) sees the prompt plus the existing library in `./.pi/sub-agents`. It returns the team through a `propose_team` tool call:
    - For each agent: `{ name, purpose, reuse: existingName | null }`.
    - A short parallel/sequence plan, used only as a hint.

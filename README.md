@@ -1,12 +1,12 @@
 # auto-agent
 
-A Pi extension. The first prompt of a session is answered by a team of sub-agents designed for that prompt:
+A Pi extension. It is off by default: type `/auto-agent` (you'll see "auto-agent activated") and the next prompt is answered by a team of sub-agents designed for that prompt. Type `/auto-agent` again to deactivate it, which drops the team and gives the session its normal tools back.
 
 1. **Design** — a nested model call proposes a team (reusing or refining agents already in the library, always with a verifier).
 2. **Define** — each new or refined agent is written to the project's own `.pi/sub-agents/<name>.md`, in parallel. A run manifest goes to `.pi/sub-agents/runs/`. Each project has its own library; if pi is started in your home directory (or above it), no team is designed, so nothing lands in the global `~/.pi`.
 3. **Orchestrate** — your session becomes the orchestrator and runs the team with the `spawn_agents` tool. It can only read and delegate (`read`, `grep`, `find`, `ls`, `spawn_agents`); all code, tests and fixes are done by sub-agents. Each worker is a separate `pi` process.
 
-Later prompts behave like normal Pi, and `spawn_agents` stays available. See [SPEC.md](SPEC.md) for the full design.
+After that, later prompts behave like normal Pi, and `spawn_agents` stays available. See [SPEC.md](SPEC.md) for the full design.
 
 ## Install
 
@@ -18,6 +18,7 @@ ln -s "$PWD/extensions/auto-agent" ~/.pi/agent/extensions/auto-agent
 
 | Env var | Default | Meaning |
 |---|---|---|
+| `PI_AUTOAGENT_ENABLED` | off | `1` starts every session with auto-agent already on, as if you had typed `/auto-agent` |
 | `PI_AUTOAGENT_CONCURRENCY` | unlimited | Max workers running at once per `spawn_agents` call |
 | `PI_AUTOAGENT_MAX_DEPTH` | 2 | Worker nesting cap (2 = orchestrator → worker → helper) |
 | `PI_AUTOAGENT_VIEW` | auto | Live view per worker: `herdr` (tab), `tmux` (window), `ghostty` (window; on macOS one shared window of tiled panes) or `off`. Auto picks herdr inside herdr, tmux inside tmux, else Ghostty on a desktop, else off |

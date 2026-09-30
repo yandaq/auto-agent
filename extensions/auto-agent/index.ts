@@ -35,6 +35,8 @@ const PROMPT_ENV = "PI_AUTOAGENT_ORIGINAL_PROMPT";
 const WIDGET_ID = "auto-agent";
 const STATUS_ID = "auto-agent";
 
+const ENABLED_ENV = "PI_AUTOAGENT_ENABLED";
+
 interface TeamState {
 	team: Team;
 	prompt: string;
@@ -45,15 +47,21 @@ export default function (pi: ExtensionAPI) {
 	const { depth } = depthConfig();
 	const isWorker = depth > 0;
 	let state: TeamState | undefined;
+	// Off until /auto-agent (or PI_AUTOAGENT_ENABLED=1); a resumed session with a team stays on.
+	let active = process.env[ENABLED_ENV] === "1";
+	let toolsBefore: string[] | undefined;
 
 	pi.on("session_start", async (_event, ctx) => {
 		if (isWorker) return;
 		const saved = ctx.sessionManager
 			.getEntries()
 			.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === ENTRY_TYPE)
-			.pop() as { data?: TeamState } | undefined;
-		state = saved?.data;
-		if (state) restrictToOrchestratorTools(pi);
+			.pop() as { data?: Partial<TeamState> } | undefined;
+		state = saved?.data?.team ? (saved.data as TeamState) : undefined;
+		if (state) {
+			active = true;
+			restrict();
+		}
 
 		if (ctx.hasUI && multiAgentLoaded(ctx.cwd)) {
 			ctx.ui.notify(
@@ -64,13 +72,10 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("input", async (event, ctx) => {
-		if (isWorker || state || event.source === "extension" || event.streamingBehavior === "steer") {
+		if (isWorker || !active || state || event.source === "extension" || event.streamingBehavior === "steer") {
 			return { action: "continue" };
 		}
-		const hasUserMessage = ctx.sessionManager
-			.getEntries()
-			.some((e: { type: string; message?: { role: string } }) => e.type === "message" && e.message?.role === "user");
-		if (hasUserMessage || !ctx.model) return { action: "continue" };
+		if (!ctx.model) return { action: "continue" };
 		const dir = projectLibraryDir(ctx.cwd);
 		if (!dir) {
 			if (ctx.hasUI) {
@@ -97,7 +102,7 @@ export default function (pi: ExtensionAPI) {
 			});
 			state = { team: result.team, prompt: event.text, runId };
 			pi.appendEntry(ENTRY_TYPE, state);
-			restrictToOrchestratorTools(pi);
+			restrict();
 			if (ctx.hasUI) {
 				ctx.ui.notify(
 					`auto-agent: team of ${result.agents.length} ready (${result.team.members.map((m) => m.name).join(", ")}). ` +
@@ -136,6 +141,28 @@ export default function (pi: ExtensionAPI) {
 		const reason = blockedToolReason(event.toolName);
 		if (reason) return { block: true, reason };
 	});
+
+	function restrict(): void {
+		toolsBefore ??= pi.getActiveTools();
+		restrictToOrchestratorTools(pi);
+	}
+
+	if (!isWorker) {
+		pi.registerCommand("auto-agent", {
+			description: "Toggle auto-agent: when on, the next prompt is answered by a designed team of sub-agents",
+			handler: async (_args, ctx) => {
+				active = !active;
+				if (!active && state) {
+					// Drop the team and give the session its tools back; the entry keeps a resume from restoring it.
+					state = undefined;
+					pi.appendEntry(ENTRY_TYPE, {});
+					if (toolsBefore) pi.setActiveTools(toolsBefore);
+					toolsBefore = undefined;
+				}
+				ctx.ui.notify(active ? "auto-agent activated" : "auto-agent deactivated", "info");
+			},
+		});
+	}
 
 	pi.registerTool({
 		name: SPAWN_TOOL,

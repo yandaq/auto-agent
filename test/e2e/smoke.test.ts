@@ -26,7 +26,7 @@ it.runIf(enabled)(
 				"--model", model, "--thinking", "off",
 				"Create a.txt containing 'alpha' and b.txt containing 'beta'.",
 			],
-			{ cwd, encoding: "utf8", timeout: 540_000 },
+			{ cwd, encoding: "utf8", env: { ...process.env, PI_AUTOAGENT_ENABLED: "1" }, timeout: 540_000 },
 		);
 		expect(run.status).toBe(0);
 

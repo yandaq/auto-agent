@@ -5,8 +5,8 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { type AgentDef, loadLibrary, writeAgent } from "./library.ts";
+import { manifestPath as manifestFile } from "./runs.ts";
 
 export interface ToolSpec {
 	name: string;
@@ -40,6 +40,8 @@ export interface Team {
 }
 
 export const WORKER_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+/** Tools the verifier never gets: it reports defects, the owning agent fixes them. */
+export const VERIFIER_DENIED_TOOLS = ["edit", "write"];
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 export const TEAM_TOOL: ToolSpec = {
@@ -53,7 +55,7 @@ export const TEAM_TOOL: ToolSpec = {
 				items: {
 					type: "object",
 					properties: {
-						name: { type: "string", description: "kebab-case agent name" },
+						name: { type: "string", description: "kebab-case generic role name (e.g. backend-api-dev), not tied to this project" },
 						purpose: { type: "string", description: "What this agent does on this task" },
 						mode: {
 							type: "string",
@@ -89,7 +91,10 @@ export const DEFINE_TOOL: ToolSpec = {
 
 const DESIGN_SYSTEM = `You design teams of sub-agents for a coding harness. An orchestrator will use your team to complete the user's task as fast as possible. Compute is unlimited: favour many narrow specialists that can run in parallel over a few generalists. Always include exactly one verifier that checks the final result. Prefer reusing or refining agents from the existing library over creating near-duplicates. Answer only by calling propose_team.`;
 
-const DEFINE_SYSTEM = `You write sub-agent definitions for a coding harness. Each sub-agent is a separate process that receives one task from an orchestrator and must return a concise, complete report of what it did or found. Write a focused system prompt for the role, grant only the tools it needs, and, only when models are offered, pick a cheaper model when the role is simple. Answer only by calling define_agent.`;
+const DEFINE_SYSTEM = `You write sub-agent definitions for a coding harness. Each sub-agent is a separate process that receives one task from an orchestrator and must return a concise, complete report of what it did or found. A definition is a reusable role, saved to a library and used again on other projects: it must still make sense on a different project with the same kind of work.
+Include: the role's responsibility, what it owns and must not touch, how it works in general (read the task and the repo's existing conventions and contracts before changing anything, verify its own work), and the report format.
+Exclude: project or product names, concrete file paths, routes, ports, schemas, class or id names, the chosen stack or versions, step lists for the current deliverable, and any "edit file X" instruction. The orchestrator supplies these in each task.
+Grant only the tools the role needs and, only when models are offered, pick a cheaper model when the role is simple. Answer only by calling define_agent.`;
 
 export function normalizeTeam(raw: unknown, library: AgentDef[]): Team {
 	const input = (raw ?? {}) as { members?: unknown[]; plan?: unknown; verifier?: unknown };
@@ -114,16 +119,23 @@ export function normalizeTeam(raw: unknown, library: AgentDef[]): Team {
 		verifier = "verifier";
 		members.push({
 			name: verifier,
-			purpose: "Check that the combined result fully and correctly answers the task.",
+			purpose: "Check that the combined result fully and correctly answers the task, and report each defect with the agent that owns it.",
 			mode: known.has(verifier) ? "reuse" : "new",
 		});
 	}
+	// A library verifier that may change files must be rewritten as read-only.
+	const v = members.find((m) => m.name === verifier) as Member;
+	const existing = library.find((a) => a.name === verifier);
+	if (v.mode === "reuse" && existing && !isReadOnly(existing)) v.mode = "refine";
 	return { members, plan: String(input.plan ?? ""), verifier };
 }
 
 export interface PipelineOptions {
 	prompt: string;
+	/** The project's agent library. */
 	dir: string;
+	/** Where this run's manifest and logs go (see runs.ts). */
+	runDir: string;
 	complete: Complete;
 	models: string[];
 	runId: string;
@@ -138,7 +150,7 @@ export interface PipelineResult {
 }
 
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
-	const { prompt, dir, complete, models, runId } = options;
+	const { prompt, dir, runDir, complete, models, runId } = options;
 	const progress = options.onProgress ?? (() => {});
 	const usage: Usage = { input: 0, output: 0 };
 	const addUsage = (u?: Partial<Usage>) => {
@@ -159,13 +171,24 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 	await Promise.all(
 		toWrite.map(async (member) => {
 			const existing = library.find((a) => a.name === member.name);
-			const res = await complete({
-				systemPrompt: DEFINE_SYSTEM,
-				prompt: definePrompt(prompt, member, team, existing, models),
-				tool: DEFINE_TOOL,
-			});
+			const isVerifier = member.name === team.verifier;
+			const request = definePrompt(prompt, member, team, existing, models, isVerifier);
+			const res = await complete({ systemPrompt: DEFINE_SYSTEM, prompt: request, tool: DEFINE_TOOL });
 			addUsage(res.usage);
-			const agent = toAgent(member.name, res.args, models);
+			let agent = toAgent(member.name, res.args, models, isVerifier);
+
+			// One rewrite when the definition still carries this project's details.
+			const found = findSpecifics(`${agent.description}\n${agent.body}`, prompt);
+			if (found.length) {
+				progress(`${member.name}: removing project specifics (${found.join(", ")})…`);
+				const retry = await complete({
+					systemPrompt: DEFINE_SYSTEM,
+					prompt: `${request}\n\nYour previous definition contained project-specific details: ${found.join(", ")}. Rewrite it as a generic role without them; the orchestrator gives these in each task.\n\nPrevious definition:\n${agent.body}`,
+					tool: DEFINE_TOOL,
+				});
+				addUsage(retry.usage);
+				agent = toAgent(member.name, retry.args, models, isVerifier);
+			}
 			writeAgent(dir, agent);
 			written.set(member.name, agent);
 		}),
@@ -175,9 +198,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 		(m) => written.get(m.name) ?? (library.find((a) => a.name === m.name) as AgentDef),
 	);
 
-	const runsDir = join(dir, "runs");
-	mkdirSync(runsDir, { recursive: true });
-	const manifestPath = join(runsDir, `${runId}.json`);
+	mkdirSync(runDir, { recursive: true });
+	const manifestPath = manifestFile(runDir);
 	writeFileSync(
 		manifestPath,
 		JSON.stringify({ runId, createdAt: new Date().toISOString(), prompt, team, usage }, null, 2),
@@ -199,27 +221,34 @@ function definePrompt(
 	team: Team,
 	existing: AgentDef | undefined,
 	models: string[],
+	isVerifier = false,
 ): string {
 	const roster = team.members.map((m) => `- ${m.name}: ${m.purpose}`).join("\n");
 	const parts = [
 		`Define the agent "${member.name}". Its purpose: ${member.purpose}`,
-		`Overall task (for context):\n${prompt}`,
+		`Overall task (context for scoping the role only; do not copy project specifics into the definition):\n${prompt}`,
 		`Full team:\n${roster}\nPlan: ${team.plan}`,
 		`Available tools: ${WORKER_TOOLS.join(", ")}`,
 		models.length
 			? `Available models: ${models.join(", ")}`
 			: "Models: inherit only. Do not set model or thinking; every agent runs on the user's default.",
 	];
+	if (isVerifier) {
+		parts.push(
+			"This agent is the team's verifier. It must never create, edit or delete files, and never fix anything itself. " +
+				"It may run read-only checks, tests, builds and the app, then report each defect with evidence and the team member that owns the affected work, so the orchestrator can send the fix to that owner. It has no edit or write tool.",
+		);
+	}
 	if (existing) {
 		parts.push(
-			`Existing definition to refine (keep what is generally useful, adapt it to this task):\n` +
+			`Existing definition to refine (keep what is generally useful, generalise or remove any project-specific content, and widen the role only where this task shows a gap):\n` +
 				`description: ${existing.description}\ntools: ${existing.tools?.join(", ") ?? ""}\n\n${existing.body}`,
 		);
 	}
 	return parts.join("\n\n");
 }
 
-function toAgent(name: string, raw: unknown, models: string[]): AgentDef {
+function toAgent(name: string, raw: unknown, models: string[], isVerifier = false): AgentDef {
 	const args = (raw ?? {}) as Record<string, unknown>;
 	const agent: AgentDef = {
 		name,
@@ -228,6 +257,7 @@ function toAgent(name: string, raw: unknown, models: string[]): AgentDef {
 	};
 	const tools = Array.isArray(args.tools) ? args.tools.filter((t) => WORKER_TOOLS.includes(String(t))) : [];
 	if (tools.length) agent.tools = tools.map(String);
+	if (isVerifier) agent.tools = verifierTools(agent.tools);
 	if (typeof args.model === "string" && models.includes(args.model)) agent.model = args.model;
 	// No model choices means the user's default model and effort apply to every agent.
 	if (models.length && typeof args.thinking === "string" && THINKING_LEVELS.includes(args.thinking)) agent.thinking = args.thinking;
@@ -239,4 +269,40 @@ function slug(text: string): string {
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "");
+}
+
+/** The verifier's tools without edit/write. No tools listed means every tool, so list the safe ones. */
+export function verifierTools(tools: string[] | undefined): string[] {
+	return (tools?.length ? tools : WORKER_TOOLS).filter((t) => !VERIFIER_DENIED_TOOLS.includes(t));
+}
+
+function isReadOnly(agent: AgentDef): boolean {
+	return !!agent.tools?.length && !agent.tools.some((t) => VERIFIER_DENIED_TOOLS.includes(t));
+}
+
+const ALLOWED_NAMES = new Set(["package.json", "readme.md", "agents.md", "claude.md", "node.js", "next.js", "vue.js", "nuxt.js"]);
+
+/**
+ * Project details that slipped into a definition meant to be a reusable role:
+ * file paths, routes, ports, CSS selectors and phrases quoted in the prompt.
+ */
+export function findSpecifics(text: string, prompt: string): string[] {
+	const found = new Set<string>();
+	const add = (match: string) => {
+		const m = match.trim();
+		if (m && !ALLOWED_NAMES.has(m.toLowerCase())) found.add(m);
+	};
+	for (const m of text.matchAll(/(?:\.{0,2}\/)?[\w.-]+\/[\w./-]*\.[a-z]{1,5}\b/gi)) add(m[0]);
+	for (const m of text.matchAll(/\b[\w-]+\.(?:js|mjs|cjs|ts|tsx|jsx|py|go|rb|java|cs|css|scss|html|sql|db|sqlite|ya?ml|toml)\b/gi)) add(m[0]);
+	for (const m of text.matchAll(/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/\S*/g)) add(m[0]);
+	for (const m of text.matchAll(/`\/[a-z][\w/-]*`/gi)) add(m[0].replaceAll("`", ""));
+	for (const m of text.matchAll(/\blocalhost:\d+|\bport\s+\d{2,5}\b/gi)) add(m[0]);
+	for (const m of text.matchAll(/(?<![\w#&])#[a-z][\w-]*/gi)) add(m[0]);
+	for (const m of text.matchAll(/`\.[a-z][\w-]*`/gi)) add(m[0].replaceAll("`", ""));
+	const lower = text.toLowerCase();
+	for (const m of prompt.matchAll(/"([^"]{3,})"|'([^']{3,})'|`([^`]{3,})`/g)) {
+		const phrase = (m[1] ?? m[2] ?? m[3]).trim();
+		if (phrase && lower.includes(phrase.toLowerCase())) found.add(`"${phrase}"`);
+	}
+	return [...found];
 }

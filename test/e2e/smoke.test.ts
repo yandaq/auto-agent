@@ -5,7 +5,7 @@
 
 import { spawnSync } from "node:child_process";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
@@ -19,6 +19,7 @@ it.runIf(enabled)(
 	() => {
 		const cwd = mkdtempSync(join(tmpdir(), "auto-agent-e2e-"));
 		execFileSync("git", ["init", "-q"], { cwd });
+		const runs = mkdtempSync(join(tmpdir(), "auto-agent-runs-"));
 		const run = spawnSync(
 			"pi",
 			[
@@ -26,13 +27,17 @@ it.runIf(enabled)(
 				"--model", model, "--thinking", "off",
 				"Create a.txt containing 'alpha' and b.txt containing 'beta'.",
 			],
-			{ cwd, encoding: "utf8", env: { ...process.env, PI_AUTOAGENT_ENABLED: "1" }, timeout: 540_000 },
+			{ cwd, encoding: "utf8", env: { ...process.env, PI_AUTOAGENT_ENABLED: "1", PI_AUTOAGENT_RUNS_DIR: runs }, timeout: 540_000 },
 		);
 		expect(run.status).toBe(0);
 
 		const dir = join(cwd, ".pi", "sub-agents");
 		expect(readdirSync(dir).filter((f) => f.endsWith(".md")).length).toBeGreaterThanOrEqual(2);
-		expect(readdirSync(join(dir, "runs"))).toHaveLength(1);
+		expect(existsSync(join(dir, "runs"))).toBe(false);
+		const [project] = readdirSync(runs);
+		const [runId] = readdirSync(join(runs, project));
+		const manifest = JSON.parse(readFileSync(join(runs, project, runId, "manifest.json"), "utf8"));
+		expect(manifest.spawns.length).toBeGreaterThan(0);
 		expect(run.stdout).toContain('"toolName":"spawn_agents"');
 		expect(existsSync(join(cwd, "a.txt")) && existsSync(join(cwd, "b.txt"))).toBe(true);
 	},

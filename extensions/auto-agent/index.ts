@@ -18,7 +18,8 @@ import { Type } from "typebox";
 import { type AgentDef, LIBRARY_DIR, loadLibrary, projectLibraryDir } from "./library.ts";
 import { openViewer, VIEW_ENV, viewerBackend } from "./viewer.ts";
 import { blockedToolReason, ORCHESTRATOR_TOOLS, orchestratorPrompt } from "./orchestrator.ts";
-import { type Complete, runPipeline, type Team } from "./pipeline.ts";
+import { type Complete, runPipeline, type Team, verifierTools } from "./pipeline.ts";
+import { manifestPath, recordSpawns, runDir, type SpawnRecord } from "./runs.ts";
 import {
 	concurrencyLimit,
 	depthConfig,
@@ -95,6 +96,7 @@ export default function (pi: ExtensionAPI) {
 			const result = await runPipeline({
 				prompt: event.text,
 				dir,
+				runDir: runDir(ctx.cwd, runId),
 				complete: nestedComplete(ctx),
 				models: modelChoices(ctx),
 				runId,
@@ -188,7 +190,8 @@ export default function (pi: ExtensionAPI) {
 				);
 			}
 
-			const logDir = join(dir, "runs", state?.runId ?? "adhoc", "logs");
+			const thisRun = runDir(ctx.cwd, state?.runId ?? "adhoc");
+			const logDir = join(thisRun, "logs");
 			const batch = timestamp();
 			const backend = viewerBackend();
 			const viewErrors: string[] = [];
@@ -212,6 +215,19 @@ export default function (pi: ExtensionAPI) {
 			}, 200);
 			render();
 
+			// Only the orchestrator's own spawns belong to the run; nested helpers have no team.
+			let manifestWarned = false;
+			const record = (spawn: SpawnRecord) => {
+				if (!state) return;
+				try {
+					recordSpawns(manifestPath(thisRun), [spawn]);
+				} catch (err) {
+					if (ctx.hasUI && !manifestWarned) {
+						ctx.ui.notify(`auto-agent: couldn't update the run manifest: ${errorText(err)}`, "warning");
+					}
+					manifestWarned = true;
+				}
+			};
 			const results = await mapWithLimit(params.tasks, concurrencyLimit(), async (t, i) => {
 				let logPath: string | undefined;
 				let view: Promise<void> | undefined;
@@ -226,8 +242,19 @@ export default function (pi: ExtensionAPI) {
 				} catch (err) {
 					viewErrors.push(`${t.agent}: ${errorText(err)}`);
 				}
+				let agent = library.find((a) => a.name === t.agent) as AgentDef;
+				// Backstop for a hand-edited library: the verifier never gets edit or write.
+				if (agent.name === state?.team.verifier) agent = { ...agent, tools: verifierTools(agent.tools) };
+				const base = {
+					id: `${batch}-${i + 1}`,
+					agent: t.agent,
+					task: t.task,
+					startedAt: new Date().toISOString(),
+					logPath,
+				};
+				record({ ...base, status: "running", exitCode: -1, turns: 0, toolCalls: 0, usage: { input: 0, output: 0 } });
 				const result = await runWorker({
-					agent: library.find((a) => a.name === t.agent) as AgentDef,
+					agent,
 					task: t.task,
 					originalPrompt,
 					cwd: ctx.cwd,
@@ -242,6 +269,16 @@ export default function (pi: ExtensionAPI) {
 					},
 				});
 				await view;
+				record({
+					...base,
+					status: result.status,
+					exitCode: result.exitCode,
+					turns: result.turns,
+					toolCalls: result.toolCalls,
+					usage: result.usage,
+					finishedAt: new Date().toISOString(),
+					...(result.error ? { error: result.error } : {}),
+				});
 				return result;
 			});
 			render.flush();

@@ -10,6 +10,10 @@ it("lists the team, the plan, the verifier and the file-partition rule", () => {
 	expect(text).toContain("builder first");
 	expect(text).toContain('"checker"');
 	expect(text).toContain("never edit the same files");
+	expect(text).toContain("Agent definitions are generic roles");
+	expect(text).toContain("Pass results forward yourself");
+	expect(text).toContain("Respect dependencies");
+	expect(text).toContain("The verifier never changes files");
 	expect(text).toContain("spawn_agents");
 });
 

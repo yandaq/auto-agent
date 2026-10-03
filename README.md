@@ -2,8 +2,8 @@
 
 A Pi extension. It is off by default: type `/auto-agent` (you'll see "auto-agent activated") and the next prompt is answered by a team of sub-agents designed for that prompt. Type `/auto-agent` again to deactivate it, which drops the team and gives the session its normal tools back.
 
-1. **Design** — a nested model call proposes a team (reusing or refining agents already in the library, always with a verifier).
-2. **Define** — each new or refined agent is written to the project's own `.pi/sub-agents/<name>.md`, in parallel. A run manifest goes to `.pi/sub-agents/runs/`. Each project has its own library; if pi is started in your home directory (or above it), no team is designed, so nothing lands in the global `~/.pi`.
+1. **Design** — a nested model call proposes a team (reusing or refining agents already in the library, always with a verifier). The verifier is read-only: it reports defects, and the orchestrator sends each fix to the agent that owns that work.
+2. **Define** — each new or refined agent is written to the project's own `.pi/sub-agents/<name>.md`, in parallel. Definitions are generic roles; a definition that still names project paths, routes, ports, selectors or phrases quoted in the prompt is sent back once to be rewritten. Run records (manifest and worker logs) go outside the project, to `~/.pi/agent/auto-agent/runs/<project>-<hash>/<run-id>/`, so workers never read each other's transcripts; set `PI_AUTOAGENT_RUNS_DIR` to change the root. Each project has its own library; if pi is started in your home directory (or above it), no team is designed, so nothing lands in the global `~/.pi`.
 3. **Orchestrate** — your session becomes the orchestrator and runs the team with the `spawn_agents` tool. It can only read and delegate (`read`, `grep`, `find`, `ls`, `spawn_agents`); all code, tests and fixes are done by sub-agents. Each worker is a separate `pi` process.
 
 After that, later prompts behave like normal Pi, and `spawn_agents` stays available. See [SPEC.md](SPEC.md) for the full design.
@@ -28,7 +28,7 @@ ln -s "$PWD/extensions/auto-agent" ~/.pi/agent/extensions/auto-agent
 
 ### Live views
 
-Each worker writes a readable transcript (streamed text, tool calls, final ✔/✖) to `.pi/sub-agents/runs/<run-id>/logs/`, and a view window tails it. Views close 30 seconds after the agent finishes (set `PI_AUTOAGENT_VIEW_CLOSE`); the log file is kept. Only the orchestrator's workers get views, not nested helpers.
+Each worker writes a readable transcript (streamed text, tool calls, final ✔/✖) to the run's `logs/` folder under `~/.pi/agent/auto-agent/runs/<project>-<hash>/<run-id>/`, and a view window tails it. The run's `manifest.json` also records every spawn (agent, task, status, turns, tokens, times, log path) and lists which team members were used and which were not. Views close 30 seconds after the agent finishes (set `PI_AUTOAGENT_VIEW_CLOSE`); the log file is kept. Only the orchestrator's workers get views, not nested helpers.
 
 ## Tests
 

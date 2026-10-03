@@ -45,7 +45,7 @@ export function buildWorkerArgs(agent: AgentDef, task: string, promptPath: strin
 }
 
 export function workerTask(task: string, originalPrompt: string): string {
-	return `Task: ${task}\n\n---\nBackground — the user's original request, which the whole team is working on. Do only your task above; use this for context:\n\n${originalPrompt}`;
+	return `Task: ${task}\n\nEverything you need is in this task and the repository. Ignore the .pi folder: it holds the harness's agent definitions, not project code.\n\n---\nBackground — the user's original request, which the whole team is working on. Do only your task above; use this for context:\n\n${originalPrompt}`;
 }
 
 export function truncate(text: string, limit = OUTPUT_LIMIT): string {

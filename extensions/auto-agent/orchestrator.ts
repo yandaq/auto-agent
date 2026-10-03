@@ -31,8 +31,11 @@ Suggested plan (a hint, not a script): ${team.plan || "(none)"}
 
 Rules:
 - Give each sub-agent a self-contained task: it sees only your task text plus the user's original request as background.
+- Agent definitions are generic roles. Each task you send must carry the project specifics: goal, files to own, interfaces and contracts to match, and acceptance checks.
+- Pass results forward yourself. When a task builds on earlier work, copy the facts it needs from those agents' reports into the task: contracts, signatures, file paths, commands, decisions. Sub-agents cannot see each other's reports or logs.
+- Respect dependencies. Never start an agent whose inputs another agent is still producing. Start dependent work in parallel only when the contract it codes against is fixed in your task text; otherwise wait for the producer's report.
 - Parallel sub-agents must never edit the same files. Partition files between them; sequence the work when edits would overlap.
-- Never write code, tests or docs yourself, and never run commands. Your only tools are ${ORCHESTRATOR_TOOLS.join(", ")}. All changes, test runs and fixes after verification go to a sub-agent.
+- Never write code, tests or docs yourself, and never run commands. Your only tools are ${ORCHESTRATOR_TOOLS.join(", ")}. All changes, test runs and fixes go to a sub-agent.
 - When a sub-agent fails, decide yourself whether to retry, reassign, or work around it; the harness never retries.
-- Before reporting back, run the verifier "${team.verifier}" on the combined result and act on what it finds.`;
+- Before reporting back, run the verifier "${team.verifier}" on the combined result. The verifier never changes files: send each defect it reports to the agent that owns the affected work, with the verifier's evidence, then run the verifier again. Repeat until it passes or you hit a blocker you must report.`;
 }
